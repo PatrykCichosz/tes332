@@ -1,163 +1,367 @@
 import React, { useState, useEffect } from 'react';
-import {
-  View,
-  Text,
-  Button,
-  Alert,
-  StyleSheet,
-  TouchableWithoutFeedback,
-  Keyboard,
-} from 'react-native';
-import * as Notifications from 'expo-notifications';
+import { View, Text, TouchableOpacity, StyleSheet, ActivityIndicator, Modal, TextInput, Alert, Keyboard, TouchableWithoutFeedback } from 'react-native';
 import * as Location from 'expo-location';
-import * as Device from 'expo-device';
+import * as Notifications from 'expo-notifications';
 import axios from 'axios';
 
 const WeatherApp = () => {
-  const [weatherData, setweatherData] = useState(null);
+  const [weatherData, setWeatherData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
-
+  const [selectedCriteria, setSelectedCriteria] = useState('');
+  const [criteriaValue, setCriteriaValue] = useState('');
+  const [condition, setCondition] = useState('');
+  const [showCriteriaMenu, setShowCriteriaMenu] = useState(false);
+  const [pushToken, setPushToken] = useState(null);  // To store the push token
   const apiKey = 'b4d4d39a000cd956500a0f09059acaf8';
 
   useEffect(() => {
-    Notifications.setNotificationHandler({
-      handleNotification: async () => ({
-        shouldShowAlert: true,
-        shouldPlaySound: true,
-        shouldSetBadge: true
-      }),
-    });
-
-
-    setupNotifications();
     getDeviceWeather();
+    registerForPushNotifications();
   }, []);
 
-   const setupNotifications = async () => {
-    if (Device.isDevice) {
-      const { status } = await Notifications.getPermissionsAsync();
-        if (status !== 'granted') {
-        const { status: newStatus } = await Notifications.requestPermissionsAsync();
-      if (newStatus !== 'granted') {
-            Alert.alert('Permission required', 'Notifications need to be enabled to function.');
-          return;
-        }
-      }
-    } else {
-      Alert.alert('Device Error', 'Push notifdications only work on physical devices.');
+  // Register the device for push notifications
+  const registerForPushNotifications = async () => {
+    const { status } = await Notifications.requestPermissionsAsync();
+    if (status !== 'granted') {
+      setErrorMessage('Notification permission is required.');
+      return;
     }
+    const token = await Notifications.getExpoPushTokenAsync();
+    setPushToken(token.data);
   };
 
-const getDeviceWeather = async () => {
-setLoading(true);
-setErrorMessage('');
-setweatherData(null);
-
-try {
-    const { status } = await Location.requestForegroundPermissionsAsync();
-    if (status !== 'granted') {
-      setErrorMessage('Location permission is required to get weather.');
-      setLoading(false);
-      return;
-    }
-    
-const location = await Location.getCurrentPositionAsync({});
-    const { latitude, longitude } = location.coords;
-
-    const response = await axios.get('https://api.openweathermap.org/data/2.5/weather', {
-      params: {
-        lat: latitude,
-        lon: longitude,
-        appid: apiKey,
-        units: 'metric',
-      }
-    });
-
-    setweatherData(response.data);
-  } catch (error) {
-    setErrorMessage('Could not get weather data.');
-  } finally {
-setLoading(false);
-  }
-};
-
-   const sendTestNotification = async () => {
-    if (!weatherData) {
-Alert.alert('Error', 'No weather data to send in the notification.');
-      return;
-    }
+  const getDeviceWeather = async () => {
+    setLoading(true);
+    setErrorMessage('');
+    setWeatherData(null);
 
     try {
-      await Notifications.scheduleNotificationAsync({
-        content: {
-          title: `Weather Update for ${weatherData.name}`,
-          body: `Current temperature: ${weatherData.main.temp}°C`
-        },
-        trigger: { seconds: 2 },
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== 'granted') {
+        setErrorMessage('Location permission is required to fetch weather.');
+        setLoading(false);
+        return;
+      }
+
+      const location = await Location.getCurrentPositionAsync({});
+      const { latitude, longitude } = location.coords;
+
+      const response = await axios.get('https://api.openweathermap.org/data/2.5/weather', {
+        params: {
+          lat: latitude,
+          lon: longitude,
+          appid: apiKey,
+          units: 'metric',
+        }
       });
-      console.log('Notification scheduled successfully.');
+
+      setWeatherData(response.data);
     } catch (error) {
-console.error('Notification scheduling error:', error);
+      setErrorMessage('Could not retrieve weather data. Try again later.');
+    } finally {
+      setLoading(false);
     }
   };
 
-const dismissKeyboard = () => {
-Keyboard.dismiss();
+  // Handle test notification
+  const handleTestNotification = async () => {
+    if (!selectedCriteria || !criteriaValue || !condition) {
+      Alert.alert('Error', 'Please select a criterion, condition (above/below/yes/no), and set the value.');
+      return;
+    }
+
+    if (!weatherData) {
+      Alert.alert('Error', 'Weather data is not available.');
+      return;
+    }
+
+    let conditionMet = false;
+    const temp = weatherData.main.temp;
+    const humidity = weatherData.main.humidity;
+    const rain = weatherData.rain ? weatherData.rain['1h'] : 0; // Rain volume in last 1 hour
+
+    switch (selectedCriteria) {
+      case 'Temperature':
+        if (condition === 'Above' && temp > criteriaValue) {
+          conditionMet = true;
+        } else if (condition === 'Below' && temp < criteriaValue) {
+          conditionMet = true;
+        }
+        break;
+
+      case 'Humidity':
+        if (condition === 'Above' && humidity > criteriaValue) {
+          conditionMet = true;
+        } else if (condition === 'Below' && humidity < criteriaValue) {
+          conditionMet = true;
+        }
+        break;
+
+      case 'Rain':
+        if (condition === 'Yes' && rain > 0) {
+          conditionMet = true;
+        } else if (condition === 'No' && rain === 0) {
+          conditionMet = true;
+        }
+        break;
+
+      default:
+        break;
+    }
+
+    if (conditionMet && pushToken) {
+      // Send a notification if the condition is met
+      await sendPushNotification();
+    } else {
+      Alert.alert('Notification Not Sent', `The ${selectedCriteria} condition has not been met.`);
+    }
+  };
+
+  // Send a push notification using Expo Notifications (native-like notification)
+  const sendPushNotification = async () => {
+    const message = {
+      to: pushToken,
+      sound: 'default',
+      title: 'Weather Notification',
+      body: `The ${selectedCriteria} condition has been met!`,
+      data: { criteria: selectedCriteria },
+    };
+
+    try {
+      // Expo Notifications: Send immediate push notification
+      await Notifications.scheduleNotificationAsync({
+        content: message,
+        trigger: null, // trigger it immediately
+      });
+      // Alert.alert('Notification Sent', `The ${selectedCriteria} condition has been met!`);
+    } catch (error) {
+      console.error('Error sending notification', error);
+    }
+  };
+
+  const toggleCriteriaMenu = () => {
+    setShowCriteriaMenu(!showCriteriaMenu);
+  };
+
+  // Dismiss keyboard function
+  const dismissKeyboard = () => {
+    Keyboard.dismiss();
   };
 
   return (
-<TouchableWithoutFeedback onPress={dismissKeyboard}>
-      <View style={styles.container}>
-      <Text style={styles.title}>Weather Info</Text>
+    <View style={styles.container}>
+      <Text style={styles.title}>WeatherWizard</Text>
 
-      <Button title="Get Weather" onPress={getDeviceWeather} />
+      <TouchableOpacity style={styles.button} onPress={getDeviceWeather}>
+        <Text style={styles.buttonText}>Get Weather</Text>
+      </TouchableOpacity>
 
-      {loading && <Text>Loading weather...</Text>}
+      {loading && <ActivityIndicator size="large" color="#00C6FF" />}
       {errorMessage && <Text style={styles.error}>{errorMessage}</Text>}
 
-        {weatherData && (
-          <View style={styles.weatherInfo}>
-            <Text style={styles.city}>{weatherData.name}</Text>
-            <Text>Temperature: {weatherData.main.temp}°C</Text>
-            <Text>Sky: {weatherData.weather[0].description}</Text>
-            <Text>Humidity: {weatherData.main.humidity}%</Text>
-            <Text>Wind: {weatherData.wind.speed} m/s</Text>
-          </View>
-        )}
+      {weatherData && (
+        <View style={styles.weatherInfo}>
+          <Text style={styles.city}>{weatherData.name}</Text>
+          <Text style={styles.weatherText}>🌡 Temperature: {weatherData.main.temp}°C</Text>
+          <Text style={styles.weatherText}>🌥 Sky: {weatherData.weather[0].description}</Text>
+          <Text style={styles.weatherText}>💧 Humidity: {weatherData.main.humidity}%</Text>
+          <Text style={styles.weatherText}>💨 Wind: {weatherData.wind.speed} m/s</Text>
+          <Text style={styles.weatherText}>🌧 Rain: {weatherData.rain ? weatherData.rain['1h'] : 0} mm</Text>
+        </View>
+      )}
 
-        {weatherData && (
-          <Button title="Send Weather Notification" onPress={sendTestNotification} />
-        )}
-      </View>
-    </TouchableWithoutFeedback>
+      <TouchableOpacity style={styles.button} onPress={toggleCriteriaMenu}>
+        <Text style={styles.buttonText}>Set Notification Criteria</Text>
+      </TouchableOpacity>
+
+      <TouchableOpacity style={styles.button} onPress={handleTestNotification}>
+        <Text style={styles.buttonText}>Test Notification</Text>
+      </TouchableOpacity>
+
+      <Modal
+        visible={showCriteriaMenu}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={toggleCriteriaMenu}
+      >
+        <TouchableWithoutFeedback onPress={dismissKeyboard}>
+          <View style={styles.modalContainer}>
+            <View style={styles.modalContent}>
+              <Text style={styles.criteriaText}>Select Criterion:</Text>
+
+              <TouchableOpacity
+                style={[styles.criteriaButton, selectedCriteria === 'Temperature' && styles.selectedButton]}
+                onPress={() => setSelectedCriteria('Temperature')}
+              >
+                <Text style={styles.buttonText}>Temperature</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.criteriaButton, selectedCriteria === 'Humidity' && styles.selectedButton]}
+                onPress={() => setSelectedCriteria('Humidity')}
+              >
+                <Text style={styles.buttonText}>Humidity</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.criteriaButton, selectedCriteria === 'Rain' && styles.selectedButton]}
+                onPress={() => setSelectedCriteria('Rain')}
+              >
+                <Text style={styles.buttonText}>Rain</Text>
+              </TouchableOpacity>
+
+              {selectedCriteria && (
+                <View>
+                  <Text style={styles.criteriaText}>Choose condition:</Text>
+
+                  {selectedCriteria === 'Temperature' || selectedCriteria === 'Humidity' ? (
+                    <View>
+                      <TouchableOpacity
+                        style={[styles.criteriaButton, condition === 'Above' && styles.selectedButton]}
+                        onPress={() => setCondition('Above')}
+                      >
+                        <Text style={styles.buttonText}>Above</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={[styles.criteriaButton, condition === 'Below' && styles.selectedButton]}
+                        onPress={() => setCondition('Below')}
+                      >
+                        <Text style={styles.buttonText}>Below</Text>
+                      </TouchableOpacity>
+                    </View>
+                  ) : null}
+
+                  {selectedCriteria === 'Rain' && (
+                    <View>
+                      <TouchableOpacity
+                        style={[styles.criteriaButton, condition === 'Yes' && styles.selectedButton]}
+                        onPress={() => setCondition('Yes')}
+                      >
+                        <Text style={styles.buttonText}>Yes</Text>
+                      </TouchableOpacity>
+
+                      <TouchableOpacity
+                        style={[styles.criteriaButton, condition === 'No' && styles.selectedButton]}
+                        onPress={() => setCondition('No')}
+                      >
+                        <Text style={styles.buttonText}>No</Text>
+                      </TouchableOpacity>
+                    </View>
+                  )}
+
+                  <TextInput
+                    style={styles.input}
+                    placeholder={`Enter ${selectedCriteria} value`}
+                    value={criteriaValue}
+                    onChangeText={setCriteriaValue}
+                    keyboardType="numeric"
+                  />
+                </View>
+              )}
+
+              <TouchableOpacity style={styles.button} onPress={toggleCriteriaMenu}>
+                <Text style={styles.buttonText}>Close</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </TouchableWithoutFeedback>
+      </Modal>
+    </View>
   );
 };
 
 const styles = StyleSheet.create({
-container: {
+  container: {
     flex: 1,
-  justifyContent: 'center',
+    justifyContent: 'center',
     alignItems: 'center',
-padding: 20
+    padding: 20,
+    backgroundColor: '#1C1C1C',
   },
-title: {
-  fontSize: 28,
+  title: {
+    fontSize: 24,
+    color: '#00C6FF',
+    fontWeight: 'bold',
     marginBottom: 20,
   },
-error: {
-color: 'red',
-    marginTop: 10,
-},
-weatherInfo: {
-marginTop: 20,
-alignItems: 'center'
+  button: {
+    backgroundColor: '#00C6FF',
+    padding: 10,
+    borderRadius: 8,
+    marginVertical: 10,
+    width: '80%',
+    alignItems: 'center',
   },
-city: {
-    fontSize: 24,
+  buttonText: {
+    color: '#FFFFFF',
+    fontSize: 18,
+  },
+  error: {
+    color: 'red',
+    marginTop: 10,
+  },
+  weatherInfo: {
+    marginTop: 20,
+    alignItems: 'center',
+  },
+  city: {
+    fontSize: 28,
+    color: '#FFFFFF',
     fontWeight: 'bold',
-marginBottom: 10
-  }
+  },
+  weatherText: {
+    fontSize: 18,
+    color: '#FFFFFF',
+  },
+  modalContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+  },
+  modalContent: {
+    backgroundColor: '#1C1C1C',
+    padding: 20,
+    borderRadius: 8,
+    width: '80%',
+  },
+  criteriaText: {
+    fontSize: 16,
+    color: '#FFFFFF',
+    marginBottom: 10,
+  },
+  criteriaButton: {
+    backgroundColor: '#333',
+    padding: 10,
+    borderRadius: 8,
+    marginVertical: 5,
+    alignItems: 'center',
+  },
+  selectedButton: {
+    backgroundColor: '#00C6FF',
+  },
+  doneButtonContainer: {
+    marginTop: 20,
+    width: '100%',
+    alignItems: 'center',
+  },
+  doneButton: {
+    backgroundColor: '#00C6FF',
+    padding: 10,
+    borderRadius: 8,
+    width: '50%',
+    alignItems: 'center',
+  },
+  input: {
+    backgroundColor: '#333',
+    padding: 10,
+    borderRadius: 8,
+    width: '80%',
+    marginVertical: 10,
+    color: '#FFFFFF',
+    fontSize: 16,
+  },
 });
 
 export default WeatherApp;

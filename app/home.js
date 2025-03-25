@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, Button, StyleSheet, Alert } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, Alert } from 'react-native';
 
 const Home = ({ navigation }) => {
   const handleNav = (screen) => {
@@ -15,21 +15,17 @@ const Home = ({ navigation }) => {
       <Text style={styles.title}>NotiApp</Text>
 
       <View style={styles.optionsContainer}>
-        <Button
-          title="BusBuddy"
-          onPress={() => handleNav('BusBuddy')}
-          color="#009900"
-        />
-        <Button
-          title="WeatherWizard"
-          onPress={() => handleNav('WeatherWizard')}
-          color="#0080FF"
-        />
-        <Button
-          title="TrendTracker"
-          onPress={() => handleNav('TrendTracker')}
-          color="#FF0000"
-        />
+        <TouchableOpacity style={[styles.button, { backgroundColor: '#009900' }]} onPress={() => handleNav('BusBuddy')}>
+          <Text style={styles.buttonText}>BusBuddy</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity style={[styles.button, { backgroundColor: '#0080FF' }]} onPress={() => handleNav('WeatherWizard')}>
+          <Text style={styles.buttonText}>WeatherWizard</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity style={[styles.button, { backgroundColor: '#FF0000' }]} onPress={() => handleNav('TrendTracker')}>
+          <Text style={styles.buttonText}>TrendTracker</Text>
+        </TouchableOpacity>
       </View>
     </View>
   );
@@ -38,17 +34,33 @@ const Home = ({ navigation }) => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+    backgroundColor: '#121212',
     alignItems: 'center',
-    padding: 20
+    justifyContent: 'center',
+    padding: 20,
   },
   title: {
-    fontSize: 32,
-    marginBottom: 100,
+    fontSize: 36,
+    fontWeight: 'bold',
+    color: '#FFFFFF',
+    marginBottom: 50,
   },
   optionsContainer: {
-    justifyContent: 'space-around',
+    width: '100%',
+    alignItems: 'center',
+  },
+  button: {
     width: '80%',
-    flex: 0.5
+    padding: 15,
+    borderRadius: 10,
+    alignItems: 'center',
+    marginVertical: 10,
+  },
+  buttonText: {
+    color: '#FFFFFF',
+    fontSize: 18,
+    fontWeight: 'bold',
   },
 });
+
 export default Home;
